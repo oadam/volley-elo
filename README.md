@@ -4,6 +4,7 @@ Computes ELO ratings for volleyball teams from match results scraped from ffvbbe
 
 Each point scored is treated as a minimatch. Ratings are found by maximising the
 log-likelihood of all observed point totals simultaneously (convex optimisation via scipy).
+Older matches are down-weighted so that ratings follow each team's current level.
 
 ## Setup
 
@@ -16,23 +17,74 @@ venv/bin/pip install -r requirements.txt
 
 ### 1. Scrape match results
 
-Fetches results from the FFVB export endpoint and saves them to `/tmp/ffvb_matches.csv`.
+Fetches results from the FFVB export endpoint for every `(season, poule)` pair listed
+in `POULES` in `scrape_matches.py`, and saves them to `/tmp/ffvb_matches.csv` with
+columns `saison, poule, date, team_a, team_b, score_a, score_b`.
 
 ```bash
 python3 scrape_matches.py
 ```
 
+Poules currently scraped (committee `PTPO17`):
+
+| Season    | Poules                                                   |
+|-----------|----------------------------------------------------------|
+| 2025/2026 | `ALA`, `ALB` (mixed first phase), `AL1`, `AL2`, `AL3`    |
+| 2026/2027 | `LA1`, `LA2`, `LA3`, `LA4`                               |
+
+Only played matches (with a points total) are kept. A poule with no results yet is
+reported and skipped, so upcoming poules can be listed in advance.
+
+The mixed first-phase poules (`ALA`, `ALB`) matter: they are the only matches between
+teams that later end up in different divisions, and without them ratings across
+divisions are not comparable.
+
+**Finding poule codes.** Calling the export with an empty `cal_codpoule` returns every
+poule of the committee for that season. The `Match` column is the poule code, a leg
+letter (`A` aller / `R` retour) and a number, e.g. `AL1R014` → poule `AL1`:
+
+```bash
+curl -s -d "cal_saison=2025/2026&cal_codent=PTPO17&cal_codpoule=&typ_edition=E&type=RES" \
+  https://www.ffvbbeach.org/ffvbapp/resu/vbspo_calendrier_export.php \
+  | iconv -f latin1 -t utf8 | cut -d';' -f3 | sed 's/...$//' | sort | uniq -c
+```
+
 ### 2. Compute ELO ratings
 
-Reads from `/tmp/ffvb_matches.csv` (so you can iterate without re-hitting the server).
+Reads from `/tmp/ffvb_matches.csv` by default (so you can iterate without re-hitting
+the server), or from a given file, or from stdin with `-`.
 
 ```bash
 venv/bin/python compute_elo.py
 ```
 
-Older matches are down-weighted with an exponential decay: a match's weight halves
-every 180 days (counted back from the most recent match). Change it with
-`--half-life DAYS`, or disable it with `--half-life 0`.
+#### Time weighting
+
+Each match's contribution to the log-likelihood is multiplied by
+
+```
+weight = 0.5 ^ (age_days / half_life)
+```
+
+where `age_days` is counted back from the most recent match in the data. The default
+half-life is 180 days: a match from six months ago counts half as much as the latest
+one, a match from a year ago a quarter. This lets ratings track form within a season
+and roster changes between seasons, while older matches still anchor teams that have
+only played a few games (typically at the start of a season).
+
+Since only relative weights matter, the choice of reference date does not change the
+ratings, and the problem stays convex. The weight of each match is shown in the
+per-match output.
+
+```bash
+venv/bin/python compute_elo.py --half-life 365   # slower decay
+venv/bin/python compute_elo.py --half-life 0     # no decay, all matches equal
+```
+
+A too-short half-life makes ratings rest on a handful of matches per team and become
+noisy; a too-long one makes them slow to react.
+
+#### Output
 
 Outputs two CSV tables to stdout:
 
