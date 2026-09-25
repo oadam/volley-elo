@@ -8,18 +8,27 @@ Each point is treated as a minimatch under the ELO model:
 Ratings are found by minimising the negative log-likelihood across all matches
 simultaneously using scipy (convex problem → global optimum guaranteed).
 
+Older matches are down-weighted: each match's log-likelihood is multiplied by
+  w = 0.5 ^ (age_days / half_life)
+where age is measured from the most recent match. Only relative weights matter,
+so the reference date does not change the ratings.
+
 Usage:
   python3 compute_elo.py                  # reads /tmp/ffvb_matches.csv
   python3 compute_elo.py matches.csv      # or a custom file
+  python3 compute_elo.py --half-life 0    # no time decay
   python3 scrape_matches.py | python3 compute_elo.py -  # from stdin
 """
+import argparse
 import csv
 import sys
+from datetime import date
 
 import numpy as np
 from scipy.optimize import minimize
 
 CACHE = "/tmp/ffvb_matches.csv"
+DEFAULT_HALF_LIFE = 180
 
 
 def load_matches(source):
@@ -27,20 +36,28 @@ def load_matches(source):
     for row in csv.DictReader(source):
         sa, sb = int(row["score_a"]), int(row["score_b"])
         if sa > 0 and sb > 0:
-            matches.append((row["team_a"], row["team_b"], sa, sb))
+            day = date.fromisoformat(row["date"])
+            matches.append((row["team_a"], row["team_b"], sa, sb, day))
     return matches
 
 
-def neg_log_likelihood(r, teams_idx, matches):
+def time_weights(matches, half_life):
+    if half_life <= 0:
+        return [1.0] * len(matches)
+    latest = max(m[4] for m in matches)
+    return [0.5 ** ((latest - m[4]).days / half_life) for m in matches]
+
+
+def neg_log_likelihood(r, teams_idx, matches, weights):
     loss = 0.0
-    for a, b, sa, sb in matches:
+    for (a, b, sa, sb, _), w in zip(matches, weights):
         diff = (r[teams_idx[b]] - r[teams_idx[a]]) / 400.0
         p_a = 1.0 / (1.0 + 10.0 ** diff)
-        loss -= sa * np.log(p_a) + sb * np.log(1.0 - p_a)
+        loss -= w * (sa * np.log(p_a) + sb * np.log(1.0 - p_a))
     return loss
 
 
-def compute_elo(matches):
+def compute_elo(matches, weights):
     teams = sorted({m[0] for m in matches} | {m[1] for m in matches})
     idx = {t: i for i, t in enumerate(teams)}
     n = len(teams)
@@ -51,7 +68,7 @@ def compute_elo(matches):
     res = minimize(
         neg_log_likelihood,
         r0,
-        args=(idx, matches),
+        args=(idx, matches, weights),
         method="SLSQP",
         constraints=constraint,
         options={"ftol": 1e-12, "maxiter": 10_000},
@@ -61,20 +78,26 @@ def compute_elo(matches):
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "-":
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("source", nargs="?", default=CACHE,
+                        help="matches CSV, or - for stdin (default: %(default)s)")
+    parser.add_argument("--half-life", type=float, default=DEFAULT_HALF_LIFE,
+                        help="days for a match's weight to halve; 0 disables decay "
+                             "(default: %(default)s)")
+    args = parser.parse_args()
+
+    if args.source == "-":
         matches = load_matches(sys.stdin)
-    elif len(sys.argv) > 1:
-        with open(sys.argv[1]) as f:
-            matches = load_matches(f)
     else:
-        with open(CACHE) as f:
+        with open(args.source) as f:
             matches = load_matches(f)
 
     if not matches:
         print("No matches found.", file=sys.stderr)
         sys.exit(1)
 
-    ratings = compute_elo(matches)
+    weights = time_weights(matches, args.half_life)
+    ratings = compute_elo(matches, weights)
     ranked = sorted(ratings.items(), key=lambda x: -x[1])
 
     writer = csv.writer(sys.stdout)
@@ -85,15 +108,15 @@ def main():
         writer.writerow([rank, team, f"{elo:.1f}"])
 
     print()
-    writer.writerow(["team_a", "team_b", "score_a", "score_b", "perf_a", "perf_b"])
-    for a, b, sa, sb in matches:
+    writer.writerow(["date", "team_a", "team_b", "score_a", "score_b", "weight", "perf_a", "perf_b"])
+    for (a, b, sa, sb, day), w in zip(matches, weights):
         if sa == 0 or sb == 0:
-            writer.writerow([a, b, sa, sb, "forfeit", "forfeit"])
+            writer.writerow([day, a, b, sa, sb, f"{w:.3f}", "forfeit", "forfeit"])
             continue
         # PR = opponent_elo + 400 * log10(own_points / opponent_points)
         pr_a = ratings[b] + 400 * np.log10(sa / sb)
         pr_b = ratings[a] + 400 * np.log10(sb / sa)
-        writer.writerow([a, b, sa, sb, f"{pr_a:.1f}", f"{pr_b:.1f}"])
+        writer.writerow([day, a, b, sa, sb, f"{w:.3f}", f"{pr_a:.1f}", f"{pr_b:.1f}"])
 
 
 if __name__ == "__main__":

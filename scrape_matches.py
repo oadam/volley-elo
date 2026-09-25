@@ -54,6 +54,7 @@ def parse_matches(rows, season, poule):
             continue
         matches.append({
             "saison": season,
+            "date": str(row[3]).strip(),
             "poule": poule,
             "team_a": team_a,
             "team_b": team_b,
@@ -68,9 +69,9 @@ CACHE = "/tmp/ffvb_matches.csv"
 
 def write_csv(matches, dest):
     writer = csv.writer(dest)
-    writer.writerow(["saison", "poule", "team_a", "team_b", "score_a", "score_b"])
+    writer.writerow(["saison", "poule", "date", "team_a", "team_b", "score_a", "score_b"])
     for m in matches:
-        writer.writerow([m["saison"], m["poule"], m["team_a"], m["team_b"], m["score_a"], m["score_b"]])
+        writer.writerow([m["saison"], m["poule"], m["date"], m["team_a"], m["team_b"], m["score_a"], m["score_b"]])
 
 
 def main():
