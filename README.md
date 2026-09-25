@@ -91,8 +91,10 @@ scale: the **weighted mean of all ratings is 0**, each team weighted by the sum 
 weights of the matches it played. A positive rating means above the current average,
 a negative one below.
 
-Teams that played recently define the zero, and teams that only played long ago
-barely move it, so adding a new season's teams does not shift everyone's rating.
+The zero therefore tracks the current field: teams that played recently define it,
+and teams that stopped playing long ago barely move it. It still moves when the field
+changes (e.g. new teams in a new season), which shifts every rating by the same
+amount — compare rankings or rating gaps rather than raw values over time.
 
 The scale is not comparable to chess ELO: since every point is a minimatch, a
 100-point gap means winning about 64% of the points (roughly 25-14 per set).
