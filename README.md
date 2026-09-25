@@ -84,6 +84,19 @@ venv/bin/python compute_elo.py --half-life 0     # no decay, all matches equal
 A too-short half-life makes ratings rest on a handful of matches per team and become
 noisy; a too-long one makes them slow to react.
 
+#### Anchoring
+
+Only rating differences are determined by the data, so one constraint fixes the
+scale: the **weighted mean of all ratings is 0**, each team weighted by the sum of the
+weights of the matches it played. A positive rating means above the current average,
+a negative one below.
+
+Teams that played recently define the zero, and teams that only played long ago
+barely move it, so adding a new season's teams does not shift everyone's rating.
+
+The scale is not comparable to chess ELO: since every point is a minimatch, a
+100-point gap means winning about 64% of the points (roughly 25-14 per set).
+
 #### Output
 
 Outputs two CSV tables to stdout:

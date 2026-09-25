@@ -13,6 +13,10 @@ Older matches are down-weighted: each match's log-likelihood is multiplied by
 where age is measured from the most recent match. Only relative weights matter,
 so the reference date does not change the ratings.
 
+Ratings are anchored so that their weighted mean is 0, each team weighted by the
+sum of its match weights. Teams that played recently define the zero; teams that
+only played long ago barely move it.
+
 Usage:
   python3 compute_elo.py                  # reads /tmp/ffvb_matches.csv
   python3 compute_elo.py matches.csv      # or a custom file
@@ -62,8 +66,14 @@ def compute_elo(matches, weights):
     idx = {t: i for i, t in enumerate(teams)}
     n = len(teams)
 
-    r0 = np.full(n, 1500.0)
-    constraint = {"type": "eq", "fun": lambda r: np.mean(r) - 1500.0}
+    team_w = np.zeros(n)
+    for (a, b, *_), w in zip(matches, weights):
+        team_w[idx[a]] += w
+        team_w[idx[b]] += w
+    team_w /= team_w.sum()
+
+    r0 = np.zeros(n)
+    constraint = {"type": "eq", "fun": lambda r: team_w @ r}
 
     res = minimize(
         neg_log_likelihood,
