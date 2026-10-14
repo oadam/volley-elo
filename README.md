@@ -110,6 +110,22 @@ Performance rating for a team in a given match is the ELO they would need to hav
 their observed point fraction exactly expected: `PR = opponent_elo + 400 × log10(own_pts / opp_pts)`.
 It is zero-sum: one team's outperformance always equals the other's underperformance.
 
+#### Monthly history
+
+```bash
+venv/bin/python compute_elo.py --monthly
+```
+
+Outputs one row per team and one column per month (`team, 2025-11, 2025-12, …`), sorted
+by the latest rating. Each column is a full refit using only the matches played by the
+end of that month, with time decay counted from that date: it is the rating as it
+would have been computed then, without hindsight. A team's cells are empty until its
+first match.
+
+Months without matches (e.g. summer) repeat the previous ratings, since decay scales all
+weights by the same factor. The anchoring caveat applies: when the field changes, the
+whole column shifts, so compare ranks and gaps across months rather than raw values.
+
 ### Run both in one shot
 
 ```bash

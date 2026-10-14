@@ -21,12 +21,13 @@ Usage:
   python3 compute_elo.py                  # reads /tmp/ffvb_matches.csv
   python3 compute_elo.py matches.csv      # or a custom file
   python3 compute_elo.py --half-life 0    # no time decay
+  python3 compute_elo.py --monthly        # rating at each month end
   python3 scrape_matches.py | python3 compute_elo.py -  # from stdin
 """
 import argparse
 import csv
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 from scipy.optimize import minimize
@@ -52,13 +53,18 @@ def time_weights(matches, half_life):
     return [0.5 ** ((latest - m[4]).days / half_life) for m in matches]
 
 
-def neg_log_likelihood(r, teams_idx, matches, weights):
-    loss = 0.0
-    for (a, b, sa, sb, _), w in zip(matches, weights):
-        diff = (r[teams_idx[b]] - r[teams_idx[a]]) / 400.0
-        p_a = 1.0 / (1.0 + 10.0 ** diff)
-        loss -= w * (sa * np.log(p_a) + sb * np.log(1.0 - p_a))
-    return loss
+K = np.log(10) / 400  # P(A wins a point) = sigmoid(K * (r_A - r_B))
+
+
+def neg_log_likelihood(r, ia, ib, sa, sb, w):
+    """Weighted negative log-likelihood and its gradient."""
+    x = K * (r[ia] - r[ib])
+    # log p_a = -log(1 + e^-x), log(1 - p_a) = -log(1 + e^x)
+    loss = w @ (sa * np.logaddexp(0, -x) + sb * np.logaddexp(0, x))
+    p_a = np.exp(-np.logaddexp(0, -x))
+    g = -w * K * (sa - (sa + sb) * p_a)  # d loss / d r_A for each match
+    grad = np.bincount(ia, g, len(r)) - np.bincount(ib, g, len(r))
+    return loss, grad
 
 
 def compute_elo(matches, weights):
@@ -66,25 +72,49 @@ def compute_elo(matches, weights):
     idx = {t: i for i, t in enumerate(teams)}
     n = len(teams)
 
-    team_w = np.zeros(n)
-    for (a, b, *_), w in zip(matches, weights):
-        team_w[idx[a]] += w
-        team_w[idx[b]] += w
+    ia = np.array([idx[m[0]] for m in matches])
+    ib = np.array([idx[m[1]] for m in matches])
+    sa = np.array([m[2] for m in matches], dtype=float)
+    sb = np.array([m[3] for m in matches], dtype=float)
+    w = np.asarray(weights, dtype=float)
+
+    team_w = np.bincount(ia, w, n) + np.bincount(ib, w, n)
     team_w /= team_w.sum()
 
     r0 = np.zeros(n)
-    constraint = {"type": "eq", "fun": lambda r: team_w @ r}
+    constraint = {"type": "eq", "fun": lambda r: team_w @ r, "jac": lambda r: team_w}
 
     res = minimize(
         neg_log_likelihood,
         r0,
-        args=(idx, matches, weights),
+        args=(ia, ib, sa, sb, w),
+        jac=True,
         method="SLSQP",
         constraints=constraint,
         options={"ftol": 1e-12, "maxiter": 10_000},
     )
-    print(f"Converged: {res.success} — {res.message}", file=sys.stderr)
+    if not res.success:
+        print(f"Not converged: {res.message}", file=sys.stderr)
     return {t: res.x[idx[t]] for t in teams}
+
+
+def month_ends(matches):
+    first = min(m[4] for m in matches).replace(day=1)
+    last = max(m[4] for m in matches)
+    month = first
+    while month <= last:
+        nxt = date(month.year + month.month // 12, month.month % 12 + 1, 1)
+        yield month, min(nxt - timedelta(days=1), last)
+        month = nxt
+
+
+def monthly_elo(matches, half_life):
+    """Ratings refitted at each month end, using only the matches played by then."""
+    history = {}
+    for month, end in month_ends(matches):
+        played = [m for m in matches if m[4] <= end]
+        history[month.strftime("%Y-%m")] = compute_elo(played, time_weights(played, half_life))
+    return history
 
 
 def main():
@@ -94,6 +124,9 @@ def main():
     parser.add_argument("--half-life", type=float, default=DEFAULT_HALF_LIFE,
                         help="days for a match's weight to halve; 0 disables decay "
                              "(default: %(default)s)")
+    parser.add_argument("--monthly", action="store_true",
+                        help="output one rating column per month, each refitted on "
+                             "the matches played by the end of that month")
     args = parser.parse_args()
 
     if args.source == "-":
@@ -106,11 +139,21 @@ def main():
         print("No matches found.", file=sys.stderr)
         sys.exit(1)
 
+    writer = csv.writer(sys.stdout)
+
+    if args.monthly:
+        history = monthly_elo(matches, args.half_life)
+        months = list(history)
+        latest = history[months[-1]]
+        writer.writerow(["team", *months])
+        for team in sorted(latest, key=lambda t: -latest[t]):
+            writer.writerow([team, *(f"{history[m][team]:.1f}" if team in history[m] else ""
+                                     for m in months)])
+        return
+
     weights = time_weights(matches, args.half_life)
     ratings = compute_elo(matches, weights)
     ranked = sorted(ratings.items(), key=lambda x: -x[1])
-
-    writer = csv.writer(sys.stdout)
 
     print()
     writer.writerow(["rank", "team", "elo"])
