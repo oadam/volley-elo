@@ -130,7 +130,8 @@ def is_connected(matches):
 def monthly_elo(matches, half_life):
     """Ratings refitted at each month end, using only the matches played by then.
 
-    Months where the teams are not all connected are left empty.
+    Months where the teams are not all connected are left empty and skipped
+    in the output.
     """
     history = {}
     for month, end in month_ends(matches):
@@ -170,12 +171,15 @@ def main():
 
     if args.monthly:
         history = monthly_elo(matches, args.half_life)
-        months = list(history)
-        latest = next((history[m] for m in reversed(months) if history[m]), {})
-        writer.writerow(["team", *months])
-        for team in sorted(latest, key=lambda t: -latest[t]):
-            writer.writerow([team, *(f"{history[m][team]:.1f}" if team in history[m] else ""
-                                     for m in months)])
+        months = [m for m in history if history[m]]
+        if not months:
+            return
+        latest = history[months[-1]]
+        teams = sorted(latest, key=lambda t: -latest[t])
+        writer.writerow(["month", *teams])
+        for m in months:
+            writer.writerow([m, *(f"{round(history[m][t], 1) + 0.0:.1f}" if t in history[m] else ""
+                                  for t in teams)])
         return
 
     weights = time_weights(matches, args.half_life)

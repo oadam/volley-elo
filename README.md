@@ -116,16 +116,16 @@ It is zero-sum: one team's outperformance always equals the other's underperform
 venv/bin/python compute_elo.py --monthly
 ```
 
-Outputs one row per team and one column per month (`team, 2025-11, 2025-12, …`), sorted
-by the latest rating. Each column is a full refit using only the matches played by the
-end of that month, with time decay counted from that date: it is the rating as it
-would have been computed then, without hindsight. A team's cells are empty until its
-first match.
+Outputs one row per month and one column per team (`month, SMVB 1, LRVB 3, …`), teams
+sorted by their latest rating, ready to chart as one line per team in a spreadsheet.
+Each row is a full refit using only the matches played by the end of that month, with
+time decay counted from that date: it is the rating as it would have been computed
+then, without hindsight. A team's cells are empty until its first match.
 
-A month is left empty, with a warning on stderr, when its teams are not all linked by a
+A month is skipped, with a warning on stderr, when its teams are not all linked by a
 chain of matches: the gap between groups that never met is then undetermined. With
 the current data, `ALA` and `ALB` only connect in February 2026, so November to January
-are empty.
+are skipped.
 
 Months without matches (e.g. summer) repeat the previous ratings, since decay scales all
 weights by the same factor. The anchoring caveat applies: when the field changes, the
