@@ -122,6 +122,11 @@ end of that month, with time decay counted from that date: it is the rating as i
 would have been computed then, without hindsight. A team's cells are empty until its
 first match.
 
+A month is left empty, with a warning on stderr, when its teams are not all linked by a
+chain of matches: the gap between groups that never met is then undetermined. With
+the current data, `ALA` and `ALB` only connect in February 2026, so November to January
+are empty.
+
 Months without matches (e.g. summer) repeat the previous ratings, since decay scales all
 weights by the same factor. The anchoring caveat applies: when the field changes, the
 whole column shifts, so compare ranks and gaps across months rather than raw values.

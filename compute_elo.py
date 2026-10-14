@@ -108,12 +108,39 @@ def month_ends(matches):
         month = nxt
 
 
+def is_connected(matches):
+    """Whether every team is linked to every other through a chain of matches.
+
+    Otherwise the gap between groups that never met is undetermined, and the
+    ratings are not unique.
+    """
+    neighbours = {}
+    for a, b, *_ in matches:
+        neighbours.setdefault(a, set()).add(b)
+        neighbours.setdefault(b, set()).add(a)
+    seen, todo = set(), [next(iter(neighbours))]
+    while todo:
+        team = todo.pop()
+        if team not in seen:
+            seen.add(team)
+            todo.extend(neighbours[team] - seen)
+    return len(seen) == len(neighbours)
+
+
 def monthly_elo(matches, half_life):
-    """Ratings refitted at each month end, using only the matches played by then."""
+    """Ratings refitted at each month end, using only the matches played by then.
+
+    Months where the teams are not all connected are left empty.
+    """
     history = {}
     for month, end in month_ends(matches):
+        key = month.strftime("%Y-%m")
         played = [m for m in matches if m[4] <= end]
-        history[month.strftime("%Y-%m")] = compute_elo(played, time_weights(played, half_life))
+        if is_connected(played):
+            history[key] = compute_elo(played, time_weights(played, half_life))
+        else:
+            print(f"{key}: teams not all connected by matches, left empty", file=sys.stderr)
+            history[key] = {}
     return history
 
 
@@ -144,7 +171,7 @@ def main():
     if args.monthly:
         history = monthly_elo(matches, args.half_life)
         months = list(history)
-        latest = history[months[-1]]
+        latest = next((history[m] for m in reversed(months) if history[m]), {})
         writer.writerow(["team", *months])
         for team in sorted(latest, key=lambda t: -latest[t]):
             writer.writerow([team, *(f"{history[m][team]:.1f}" if team in history[m] else ""
