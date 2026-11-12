@@ -1,21 +1,28 @@
+import argparse
 import re
 import csv
 import sys
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 EXPORT_URL = "https://www.ffvbbeach.org/ffvbapp/resu/vbspo_calendrier_export.php"
 
+# A FINISHED poule is fetched once, then reused from the CSV; an ONGOING one is
+# refetched on every run.
+FINISHED = "FINISHED"
+ONGOING = "ONGOING"
+
 POULES = [
-    ("2025/2026", "ALA"),
-    ("2025/2026", "ALB"),
-    ("2025/2026", "AL1"),
-    ("2025/2026", "AL2"),
-    ("2025/2026", "AL3"),
-    ("2026/2027", "LA1"),
-    ("2026/2027", "LA2"),
-    ("2026/2027", "LA3"),
-    ("2026/2027", "LA4"),
+    ("2025/2026", "ALA", FINISHED),
+    ("2025/2026", "ALB", FINISHED),
+    ("2025/2026", "AL1", FINISHED),
+    ("2025/2026", "AL2", FINISHED),
+    ("2025/2026", "AL3", FINISHED),
+    ("2026/2027", "LA1", ONGOING),
+    ("2026/2027", "LA2", ONGOING),
+    ("2026/2027", "LA3", ONGOING),
+    ("2026/2027", "LA4", ONGOING),
 ]
 
 PAYLOAD = {
@@ -64,25 +71,46 @@ def parse_matches(rows, season, poule):
     return matches
 
 
-CACHE = "/tmp/ffvb_matches.csv"
+CACHE = Path(__file__).with_name("matches.csv")
+COLUMNS = ["saison", "poule", "date", "team_a", "team_b", "score_a", "score_b"]
+
+
+def read_csv(path):
+    """Existing matches grouped by (season, poule), or {} if the file is absent."""
+    if not path.exists():
+        return {}
+    cached = {}
+    with open(path, newline="") as f:
+        for row in csv.DictReader(f):
+            cached.setdefault((row["saison"], row["poule"]), []).append(row)
+    return cached
 
 
 def write_csv(matches, dest):
-    writer = csv.writer(dest)
-    writer.writerow(["saison", "poule", "date", "team_a", "team_b", "score_a", "score_b"])
-    for m in matches:
-        writer.writerow([m["saison"], m["poule"], m["date"], m["team_a"], m["team_b"], m["score_a"], m["score_b"]])
+    writer = csv.DictWriter(dest, COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(matches)
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Scrape FFVB match results.")
+    parser.add_argument("--refresh", action="store_true",
+                        help="refetch finished poules too instead of reusing the CSV")
+    args = parser.parse_args()
+
+    cached = {} if args.refresh else read_csv(CACHE)
     matches = []
-    for season, poule in POULES:
-        rows = fetch_export(season, poule)
-        poule_matches = parse_matches(rows, season, poule)
-        if not poule_matches:
-            print(f"{season} {poule}: no played matches yet", file=sys.stderr)
-            continue
-        print(f"{season} {poule}: {len(poule_matches)} matches", file=sys.stderr)
+    for season, poule, status in POULES:
+        if status == FINISHED and (season, poule) in cached:
+            poule_matches = cached[(season, poule)]
+            print(f"{season} {poule}: {len(poule_matches)} matches (cached)", file=sys.stderr)
+        else:
+            rows = fetch_export(season, poule)
+            poule_matches = parse_matches(rows, season, poule)
+            if not poule_matches:
+                print(f"{season} {poule}: no played matches yet", file=sys.stderr)
+                continue
+            print(f"{season} {poule}: {len(poule_matches)} matches", file=sys.stderr)
         matches.extend(poule_matches)
 
     if not matches:

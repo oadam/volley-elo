@@ -18,7 +18,7 @@ sum of its match weights. Teams that played recently define the zero; teams that
 only played long ago barely move it.
 
 Usage:
-  python3 compute_elo.py                  # reads /tmp/ffvb_matches.csv
+  python3 compute_elo.py                  # reads matches.csv
   python3 compute_elo.py matches.csv      # or a custom file
   python3 compute_elo.py --half-life 0    # no time decay
   python3 compute_elo.py --monthly        # rating at each month end
@@ -28,11 +28,12 @@ import argparse
 import csv
 import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 import numpy as np
 from scipy.optimize import minimize
 
-CACHE = "/tmp/ffvb_matches.csv"
+CACHE = Path(__file__).with_name("matches.csv")
 DEFAULT_HALF_LIFE = 180
 
 

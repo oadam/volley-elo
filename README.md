@@ -18,11 +18,20 @@ venv/bin/pip install -r requirements.txt
 ### 1. Scrape match results
 
 Fetches results from the FFVB export endpoint for every `(season, poule)` pair listed
-in `POULES` in `scrape_matches.py`, and saves them to `/tmp/ffvb_matches.csv` with
-columns `saison, poule, date, team_a, team_b, score_a, score_b`.
+in `POULES` in `scrape_matches.py`, and saves them to `matches.csv` next to the scripts,
+with columns `saison, poule, date, team_a, team_b, score_a, score_b`.
 
 ```bash
 python3 scrape_matches.py
+```
+
+Each poule in `POULES` is marked `FINISHED` or `ONGOING`. A finished poule is fetched
+once, then reused from the existing `matches.csv` on later runs; ongoing poules are
+refetched every time. When a poule ends, mark it `FINISHED`. To refetch everything
+anyway (e.g. a result corrected after the fact):
+
+```bash
+python3 scrape_matches.py --refresh
 ```
 
 Poules currently scraped (committee `PTPO17`):
@@ -51,8 +60,8 @@ curl -s -d "cal_saison=2025/2026&cal_codent=PTPO17&cal_codpoule=&typ_edition=E&t
 
 ### 2. Compute ELO ratings
 
-Reads from `/tmp/ffvb_matches.csv` by default (so you can iterate without re-hitting
-the server), or from a given file, or from stdin with `-`.
+Reads from `matches.csv` by default (so you can iterate without re-hitting the
+server), or from a given file, or from stdin with `-`.
 
 ```bash
 venv/bin/python compute_elo.py
